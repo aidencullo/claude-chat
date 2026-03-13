@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude 5-Pass</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0f0f0f; color: #e0e0e0; height: 100dvh; display: flex; flex-direction: column; }
+
+    #setup {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      height: 100dvh; gap: 12px; padding: 24px;
+    }
+    #setup h1 { font-size: 22px; font-weight: 600; }
+    #setup p { color: #888; font-size: 13px; text-align: center; max-width: 340px; }
+    #setup input {
+      width: 100%; max-width: 380px; padding: 11px 14px;
+      background: #1a1a1a; border: 1px solid #333; color: #e0e0e0;
+      border-radius: 8px; font-size: 14px; outline: none;
+    }
+    #setup input:focus { border-color: #7c3aed; }
+    #setup button {
+      width: 100%; max-width: 380px; padding: 11px;
+      background: #7c3aed; color: #fff; border: none;
+      border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 500;
+    }
+    #setup button:hover { background: #6d28d9; }
+    #setup a { color: #a78bfa; font-size: 12px; text-decoration: none; }
+    #setup a:hover { text-decoration: underline; }
+
+    #app { display: none; flex-direction: column; height: 100dvh; }
+
+    #topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px; border-bottom: 1px solid #1e1e1e; font-size: 14px;
+    }
+    #topbar span { font-weight: 600; }
+    #topbar small { color: #666; font-weight: 400; margin-left: 8px; }
+    #topbar button {
+      padding: 5px 12px; background: transparent; border: 1px solid #333;
+      color: #888; border-radius: 6px; font-size: 12px; cursor: pointer;
+    }
+    #topbar button:hover { color: #e0e0e0; border-color: #555; }
+
+    #messages {
+      flex: 1; overflow-y: auto; padding: 20px 16px;
+      display: flex; flex-direction: column; gap: 20px;
+    }
+
+    .turn { display: flex; flex-direction: column; gap: 10px; }
+
+    .user-bubble {
+      align-self: flex-end; background: #7c3aed;
+      padding: 10px 14px; border-radius: 14px 14px 4px 14px;
+      font-size: 14px; line-height: 1.6; white-space: pre-wrap;
+      word-break: break-word; max-width: 75%;
+    }
+
+    .passes { display: flex; flex-direction: column; gap: 6px; align-self: flex-start; width: 100%; max-width: 78%; }
+
+    .pass-item {
+      background: #1a1a1a; border-radius: 10px; overflow: hidden;
+      border: 1px solid #2a2a2a;
+    }
+    .pass-item.final { border-color: #3d2d6b; }
+
+    .pass-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 12px; cursor: pointer; user-select: none;
+      font-size: 12px; color: #666;
+    }
+    .pass-header:hover { background: #222; }
+    .pass-item.final .pass-header { color: #a78bfa; }
+    .pass-label { font-weight: 500; }
+    .pass-toggle { font-size: 10px; transition: transform 0.2s; }
+    .pass-item.open .pass-toggle { transform: rotate(180deg); }
+
+    .pass-body {
+      display: none; padding: 0 12px 12px;
+      font-size: 14px; line-height: 1.6; white-space: pre-wrap;
+      word-break: break-word; color: #ccc;
+    }
+    .pass-item.open .pass-body { display: block; }
+    .pass-item.final .pass-body { color: #e0e0e0; }
+
+    .pass-item.streaming .pass-body::after {
+      content: '▋'; animation: blink 0.8s step-end infinite; color: #7c3aed;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .progress {
+      align-self: flex-start; font-size: 13px; color: #666;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .spinner {
+      width: 14px; height: 14px; border: 2px solid #333;
+      border-top-color: #7c3aed; border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-msg {
+      align-self: flex-start; font-size: 13px; color: #f87171;
+      background: #2d1212; border: 1px solid #5b1c1c;
+      padding: 10px 14px; border-radius: 10px; max-width: 75%;
+    }
+
+    #input-area {
+      display: flex; gap: 8px; padding: 12px 16px;
+      border-top: 1px solid #1e1e1e;
+    }
+    #input {
+      flex: 1; padding: 10px 14px; background: #1a1a1a;
+      border: 1px solid #333; color: #e0e0e0; border-radius: 10px;
+      font-size: 14px; font-family: inherit; resize: none;
+      line-height: 1.5; max-height: 160px; outline: none;
+    }
+    #input:focus { border-color: #7c3aed; }
+    #send {
+      padding: 10px 18px; background: #7c3aed; color: #fff;
+      border: none; border-radius: 10px; cursor: pointer; font-size: 14px;
+      align-self: flex-end;
+    }
+    #send:hover { background: #6d28d9; }
+    #send:disabled { opacity: 0.4; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+
+<div id="setup">
+  <h1>Claude 5-Pass</h1>
+  <p>Enter a prompt → Claude responds → that response gets passed back 5 times → you get the final result.</p>
+  <input id="api-key" type="password" placeholder="sk-ant-..." autocomplete="off" />
+  <button onclick="startApp()">Start</button>
+  <a href="https://console.anthropic.com/settings/keys" target="_blank">Get an API key →</a>
+</div>
+
+<div id="app">
+  <div id="topbar">
+    <span>Claude 5-Pass<small>5 iterations per prompt</small></span>
+    <button onclick="clearKey()">Change Key</button>
+  </div>
+  <div id="messages"></div>
+  <div id="input-area">
+    <textarea id="input" rows="1" placeholder="Enter a prompt…" oninput="autoResize(this)" onkeydown="handleKey(event)"></textarea>
+    <button id="send" onclick="runPasses()">Send</button>
+  </div>
+</div>
+
+<script>
+  const PASSES = 5;
+  let apiKey = localStorage.getItem('claude_api_key') || '';
+  let busy = false;
+
+  if (apiKey) showApp();
+
+  document.getElementById('api-key').addEventListener('keydown', e => {
+    if (e.key === 'Enter') startApp();
+  });
+
+  function startApp() {
+    const val = document.getElementById('api-key').value.trim();
+    if (!val) return;
+    apiKey = val;
+    localStorage.setItem('claude_api_key', apiKey);
+    showApp();
+  }
+
+  function showApp() {
+    document.getElementById('setup').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    document.getElementById('input').focus();
+  }
+
+  function clearKey() {
+    localStorage.removeItem('claude_api_key');
+    apiKey = '';
+    document.getElementById('messages').innerHTML = '';
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('setup').style.display = 'flex';
+    document.getElementById('api-key').value = '';
+  }
+
+  function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  }
+
+  function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      runPasses();
+    }
+  }
+
+  function scrollBottom() {
+    const m = document.getElementById('messages');
+    m.scrollTop = m.scrollHeight;
+  }
+
+  async function callClaude(prompt) {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-opus-4-6',
+        max_tokens: 4096,
+        stream: true,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${res.status}`);
+    }
+
+    return res;
+  }
+
+  async function streamIntoEl(res, el) {
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let full = '';
+    let buf = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (!data || data === '[DONE]') continue;
+        try {
+          const json = JSON.parse(data);
+          if (json.type === 'content_block_delta' && json.delta?.type === 'text_delta') {
+            full += json.delta.text;
+            el.textContent = full;
+            scrollBottom();
+          }
+        } catch {}
+      }
+    }
+    return full;
+  }
+
+  async function runPasses() {
+    if (busy) return;
+    const inputEl = document.getElementById('input');
+    const prompt = inputEl.value.trim();
+    if (!prompt) return;
+
+    inputEl.value = '';
+    inputEl.style.height = 'auto';
+    busy = true;
+    document.getElementById('send').disabled = true;
+
+    const msgs = document.getElementById('messages');
+
+    // Turn container
+    const turn = document.createElement('div');
+    turn.className = 'turn';
+
+    // User bubble
+    const userBubble = document.createElement('div');
+    userBubble.className = 'user-bubble';
+    userBubble.textContent = prompt;
+    turn.appendChild(userBubble);
+
+    // Passes container
+    const passesEl = document.createElement('div');
+    passesEl.className = 'passes';
+    turn.appendChild(passesEl);
+
+    msgs.appendChild(turn);
+    scrollBottom();
+
+    let currentPrompt = prompt;
+
+    try {
+      for (let i = 1; i <= PASSES; i++) {
+        const isFinal = i === PASSES;
+
+        // Progress indicator
+        const progressEl = document.createElement('div');
+        progressEl.className = 'progress';
+        progressEl.innerHTML = `<div class="spinner"></div> Pass ${i}/${PASSES}…`;
+        passesEl.appendChild(progressEl);
+        scrollBottom();
+
+        const res = await callClaude(currentPrompt);
+
+        // Replace progress with pass item
+        passesEl.removeChild(progressEl);
+
+        const passItem = document.createElement('div');
+        passItem.className = 'pass-item' + (isFinal ? ' final open streaming' : ' open streaming');
+
+        const header = document.createElement('div');
+        header.className = 'pass-header';
+        header.innerHTML = `<span class="pass-label">${isFinal ? '✦ Final — Pass ' + i : 'Pass ' + i}</span><span class="pass-toggle">▾</span>`;
+        header.addEventListener('click', () => passItem.classList.toggle('open'));
+
+        const body = document.createElement('div');
+        body.className = 'pass-body';
+
+        passItem.appendChild(header);
+        passItem.appendChild(body);
+        passesEl.appendChild(passItem);
+        scrollBottom();
+
+        const response = await streamIntoEl(res, body);
+        passItem.classList.remove('streaming');
+
+        // Collapse non-final passes after streaming
+        if (!isFinal) passItem.classList.remove('open');
+
+        currentPrompt = response;
+      }
+    } catch (e) {
+      const errEl = document.createElement('div');
+      errEl.className = 'error-msg';
+      errEl.textContent = 'Error: ' + e.message;
+      passesEl.appendChild(errEl);
+      scrollBottom();
+    }
+
+    busy = false;
+    document.getElementById('send').disabled = false;
+    document.getElementById('input').focus();
+  }
+</script>
+</body>
+</html>
